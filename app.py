@@ -2,10 +2,8 @@ import sqlite3
 import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
 from bs4 import BeautifulSoup
-import re
 from typing import Optional
 
 # Database configuration
@@ -31,7 +29,6 @@ def crawl_and_index():
     """Crawls the source URL and populates the database."""
     print("Crawling and indexing resources from AmbientCG...")
     try:
-        # Added a timeout of 30 seconds to prevent hanging
         response = requests.get(SOURCE_URL, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -39,25 +36,24 @@ def crawl_and_index():
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
 
-        # Find all list items, which are <a> tags with class "list-item"
-        items = soup.find_all('a', class_='list-item')
+        # Updated selector to match the current website structure
+        items = soup.find_all('div', class_='asset-list-item')
         
         count = 0
         for item in items:
-            # Extract the URL from the href attribute
-            url = f"https://ambientcg.com{item.get('href')}"
-            
-            # Extract the title from the inner <div>
-            title_div = item.find('div', class_='list-item-title')
-            title = title_div.get_text(strip=True) if title_div else "Untitled"
-            
-            # Insert or ignore duplicates based on the unique URL constraint
-            try:
-                cursor.execute("INSERT INTO textures (title, url) VALUES (?, ?)", (title, url))
-                count += 1
-            except sqlite3.IntegrityError:
-                # This means the URL already exists, so we skip it.
-                pass
+            link_tag = item.find('a')
+            title_tag = item.find('h3')
+
+            if link_tag and title_tag:
+                url = f"https://ambientcg.com{link_tag.get('href')}"
+                title = title_tag.get_text(strip=True)
+                
+                # Insert or ignore duplicates based on the unique URL constraint
+                try:
+                    cursor.execute("INSERT INTO textures (title, url) VALUES (?, ?)", (title, url))
+                    count += 1
+                except sqlite3.IntegrityError:
+                    pass
         
         conn.commit()
         conn.close()
@@ -95,7 +91,6 @@ async def home(request: Request, q: Optional[str] = None):
     
     # Determine which query to run based on the search term
     if q:
-        # Sanitize the input to prevent SQL injection (although the `?` placeholder does this)
         sanitized_q = f'%{q}%'
         cursor.execute("SELECT title, url FROM textures WHERE title LIKE ? LIMIT 50", (sanitized_q,))
         results = cursor.fetchall()
@@ -110,7 +105,6 @@ async def home(request: Request, q: Optional[str] = None):
             results_html += "</ul>"
             
     else:
-        # If no query, show the first 20 entries
         cursor.execute("SELECT title, url FROM textures LIMIT 20")
         results = cursor.fetchall()
         title = "Featured Resources"
@@ -122,7 +116,6 @@ async def home(request: Request, q: Optional[str] = None):
         
     conn.close()
     
-    # Basic HTML template for the page with TailwindCSS classes
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
