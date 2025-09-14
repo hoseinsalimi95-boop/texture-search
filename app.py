@@ -14,9 +14,9 @@ SOURCES = [
     {
         "url": "https://ambientcg.com/list",
         "name": "AmbientCG",
-        "selector": 'div.asset-list-item',
+        "selector": 'a.AssetBrowser_assetListItem__f5L0f',
         "get_title": lambda item: item.find('h3').get_text(strip=True),
-        "get_url": lambda item: f"https://ambientcg.com{item.find('a').get('href')}"
+        "get_url": lambda item: f"https://ambientcg.com{item.get('href')}"
     },
     {
         "url": "https://polyhaven.com/textures",
@@ -28,9 +28,9 @@ SOURCES = [
     {
         "url": "https://www.textures.com/browse/pbr-materials/114511",
         "name": "Textures.com (PBR)",
-        "selector": 'div.list-item',
-        "get_title": lambda item: item.find('a').get('title'),
-        "get_url": lambda item: f"https://www.textures.com{item.find('a').get('href')}"
+        "selector": 'div.list-item > a',
+        "get_title": lambda item: item.get('title'),
+        "get_url": lambda item: f"https://www.textures.com{item.get('href')}"
     }
 ]
 
@@ -72,7 +72,9 @@ def crawl_and_index_all_sources():
             print(f"Successfully fetched data. HTTP status code: {response.status_code}")
             
             soup = BeautifulSoup(response.content, 'html.parser')
-            items = soup.find_all(lambda tag: tag.select_one(selector))
+            items = soup.select(selector)
+            
+            print(f"Found {len(items)} items on the page.")
             
             count = 0
             for item in items:
