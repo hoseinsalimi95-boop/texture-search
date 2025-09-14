@@ -14,21 +14,21 @@ SOURCES = [
     {
         "url": "https://ambientcg.com/list",
         "name": "AmbientCG",
-        "selector": 'a.AssetBrowser_assetListItem__f5L0f',
+        "selector": 'a[href^="/textures/"]',
         "get_title": lambda item: item.find('h3').get_text(strip=True),
         "get_url": lambda item: f"https://ambientcg.com{item.get('href')}"
     },
     {
         "url": "https://polyhaven.com/textures",
         "name": "Poly Haven",
-        "selector": 'a.tile',
+        "selector": 'a.tile-link.tile-link__textures',
         "get_title": lambda item: item.find('h2').get_text(strip=True),
         "get_url": lambda item: f"https://polyhaven.com{item.get('href')}"
     },
     {
         "url": "https://www.textures.com/browse/pbr-materials/114511",
         "name": "Textures.com (PBR)",
-        "selector": 'div.list-item > a',
+        "selector": 'a.item-link',
         "get_title": lambda item: item.get('title'),
         "get_url": lambda item: f"https://www.textures.com{item.get('href')}"
     }
