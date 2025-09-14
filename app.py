@@ -8,8 +8,31 @@ from typing import Optional
 
 # Database configuration
 DATABASE_FILE = "textures.db"
-# Source to crawl
-SOURCE_URL = "https://ambientcg.com/list"
+
+# List of sources to crawl with specific selectors
+SOURCES = [
+    {
+        "url": "https://ambientcg.com/list",
+        "name": "AmbientCG",
+        "selector": 'div.asset-list-item',
+        "get_title": lambda item: item.find('h3').get_text(strip=True),
+        "get_url": lambda item: f"https://ambientcg.com{item.find('a').get('href')}"
+    },
+    {
+        "url": "https://polyhaven.com/textures",
+        "name": "Poly Haven",
+        "selector": 'a.tile',
+        "get_title": lambda item: item.find('h2').get_text(strip=True),
+        "get_url": lambda item: f"https://polyhaven.com{item.get('href')}"
+    },
+    {
+        "url": "https://www.textures.com/browse/pbr-materials/114511",
+        "name": "Textures.com (PBR)",
+        "selector": 'div.list-item',
+        "get_title": lambda item: item.find('a').get('title'),
+        "get_url": lambda item: f"https://www.textures.com{item.find('a').get('href')}"
+    }
+]
 
 def setup_database():
     """Initializes the SQLite database and table."""
@@ -19,50 +42,65 @@ def setup_database():
         CREATE TABLE IF NOT EXISTS textures (
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL,
-            url TEXT NOT NULL UNIQUE
+            url TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL
         )
     """)
     conn.commit()
     conn.close()
 
-def crawl_and_index():
-    """Crawls the source URL and populates the database."""
-    print("Crawling and indexing resources from AmbientCG...")
-    try:
-        response = requests.get(SOURCE_URL, timeout=30)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+def crawl_and_index_all_sources():
+    """Crawls all defined sources and populates the database with detailed logging."""
+    print("Starting the crawling and indexing process for all sources...")
+    
+    conn = sqlite3.connect(DATABASE_FILE)
+    cursor = conn.cursor()
+    
+    total_added = 0
+    for source in SOURCES:
+        url = source['url']
+        source_name = source['name']
+        selector = source['selector']
+        get_title = source['get_title']
+        get_url = source['get_url']
         
-        conn = sqlite3.connect(DATABASE_FILE)
-        cursor = conn.cursor()
-
-        # Updated selector to match the current website structure
-        items = soup.find_all('div', class_='asset-list-item')
-        
-        count = 0
-        for item in items:
-            link_tag = item.find('a')
-            title_tag = item.find('h3')
-
-            if link_tag and title_tag:
-                url = f"https://ambientcg.com{link_tag.get('href')}"
-                title = title_tag.get_text(strip=True)
-                
-                # Insert or ignore duplicates based on the unique URL constraint
+        print(f"\n--- Crawling {source_name} ---")
+        try:
+            print(f"Attempting to fetch data from: {url}")
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            print(f"Successfully fetched data. HTTP status code: {response.status_code}")
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            items = soup.find_all(lambda tag: tag.select_one(selector))
+            
+            count = 0
+            for item in items:
                 try:
-                    cursor.execute("INSERT INTO textures (title, url) VALUES (?, ?)", (title, url))
-                    count += 1
-                except sqlite3.IntegrityError:
-                    pass
-        
-        conn.commit()
-        conn.close()
-        print(f"Indexing complete. Added {count} new entries.")
+                    title = get_title(item)
+                    item_url = get_url(item)
+                    
+                    if title and item_url and item_url.startswith('http'):
+                        cursor.execute(
+                            "INSERT OR IGNORE INTO textures (title, url, source) VALUES (?, ?, ?)", 
+                            (title, item_url, source_name)
+                        )
+                        count += 1
+                except Exception as e:
+                    print(f"Failed to process an item from {source_name}: {e}")
+            
+            conn.commit()
+            total_added += count
+            print(f"Indexing complete for {source_name}. Added {count} new entries.")
 
-    except requests.exceptions.RequestException as e:
-        print(f"Error during crawling: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        except requests.exceptions.RequestException as e:
+            print(f"Error during crawling {source_name}: A network-related issue occurred. Details: {e}")
+        except Exception as e:
+            print(f"An unexpected error occurred during crawling {source_name}: {e}")
+
+    conn.close()
+    print(f"\nTotal indexing complete. Added {total_added} new entries across all sources.")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -71,7 +109,7 @@ async def lifespan(app: FastAPI):
     The database setup and crawling logic is triggered on startup.
     """
     setup_database()
-    crawl_and_index()
+    crawl_and_index_all_sources()
     yield
     # You can add cleanup code here if needed.
 
@@ -92,7 +130,7 @@ async def home(request: Request, q: Optional[str] = None):
     # Determine which query to run based on the search term
     if q:
         sanitized_q = f'%{q}%'
-        cursor.execute("SELECT title, url FROM textures WHERE title LIKE ? LIMIT 50", (sanitized_q,))
+        cursor.execute("SELECT title, url, source FROM textures WHERE title LIKE ? LIMIT 50", (sanitized_q,))
         results = cursor.fetchall()
         title = f"Search Results for '{q}'"
         
@@ -100,18 +138,18 @@ async def home(request: Request, q: Optional[str] = None):
             results_html = "<p class='text-gray-500 mt-4'>No results found.</p>"
         else:
             results_html = "<ul class='list-disc pl-5 mt-4 space-y-2'>"
-            for title, url in results:
-                results_html += f"<li><a href='{url}' target='_blank' class='text-blue-500 hover:underline'>{title}</a></li>"
+            for result_title, url, source in results:
+                results_html += f"<li><a href='{url}' target='_blank' class='text-blue-500 hover:underline'>{result_title}</a> <span class='text-xs text-gray-500'>({source})</span></li>"
             results_html += "</ul>"
             
     else:
-        cursor.execute("SELECT title, url FROM textures LIMIT 20")
+        cursor.execute("SELECT title, url, source FROM textures LIMIT 50")
         results = cursor.fetchall()
         title = "Featured Resources"
         
         results_html = "<ul class='list-disc pl-5 mt-4 space-y-2'>"
-        for title, url in results:
-            results_html += f"<li><a href='{url}' target='_blank' class='text-blue-500 hover:underline'>{title}</a></li>"
+        for result_title, url, source in results:
+            results_html += f"<li><a href='{url}' target='_blank' class='text-blue-500 hover:underline'>{result_title}</a> <span class='text-xs text-gray-500'>({source})</span></li>"
         results_html += "</ul>"
         
     conn.close()
