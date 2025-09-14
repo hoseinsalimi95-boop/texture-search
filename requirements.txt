@@ -1,6 +1,5 @@
-The following Python packages are required for the application:
-
 fastapi
 uvicorn
 requests
+
 beautifulsoup4
